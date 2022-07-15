@@ -1,30 +1,38 @@
-use actix_web::{get, post, App, HttpResponse, HttpServer, Responder};
+use actix_web::{App, HttpServer};
 use actix_web::middleware::Logger;
+use actix_web::web::Data;
 use anyhow::{Result, Ok};
+use std::env;
+use dotenv::dotenv;
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
+mod constants;
+mod config;
+mod api;
 
-    #[post("/login")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
-}
-
+use config::store::Store;
+use config::routes::config_services;
 
 #[actix_web::main]
 async fn main() -> Result<()> {
-    std::env::set_var("RUST_LOG", "actix_web=info");
+    dotenv().ok();
+    env::set_var("RUST_LOG", "actix_web=info");
     env_logger::init();
 
-    HttpServer::new(|| {
+    let app_host = env::var("APP_HOST").expect("APP_HOST not found.");
+    let app_port = env::var("APP_PORT").expect("APP_PORT not found.");
+    let redis_url = env::var("REDIS_URL").expect("You need to set up the REDIS_URL env var");
+    let psql_url = env::var("URI_PSQL_CONNECTION").expect("You need to set up the URI_PSQL_CONNECTION env var");
+    let app_url = format!("{}:{}", &app_host, &app_port);
+
+    let stores = Store::database_setup(psql_url, redis_url).await;
+
+    HttpServer::new(move || {
         App::new()
+            .app_data(Data::new(stores.clone()))
             .wrap(Logger::new("%{r}a | Route: %r | Status: %s | Time: %T s"))
-            .service(hello)
-            .service(echo)
+            .configure(config_services)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(&app_url)?
     .run()
     .await?;
 
